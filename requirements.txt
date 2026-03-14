@@ -1,0 +1,44 @@
+# -----------------------------------------------------------------------
+# Auto-Annotation Pipeline – working dependency list (Python 3.12, CUDA 12.8)
+# Install order:
+#   1. Install PyTorch first (CUDA wheels from pytorch.org):
+#      pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#
+#   2. Install everything else:
+#      pip install -r requirements.txt --no-build-isolation
+# -----------------------------------------------------------------------
+
+# Core ML (install separately via pytorch.org wheel index – see above)
+torch
+torchvision
+
+# Autodistill framework + GroundingDINO backend
+# IMPORTANT: rf-groundingdino must be installed with --no-build-isolation
+# so the build system can see the already-installed torch.
+#   pip install rf-groundingdino --no-build-isolation
+#   pip install autodistill-grounding-dino
+autodistill==0.1.29
+autodistill-grounding-dino==0.1.4
+rf-groundingdino==0.1.2        # provides the `groundingdino` Python module
+
+# Computer vision utilities
+opencv-python
+numpy
+Pillow
+
+# Grounding DINO runtime dependencies
+transformers
+timm
+addict
+yapf
+pycocotools
+
+# Supervision (annotation + NMS helpers) – must match autodistill-grounding-dino
+supervision==0.20.0
+
+# Progress bars and utilities
+tqdm
+
+# Optional: dataset management / upload to Roboflow
+scikit-learn
+roboflow
