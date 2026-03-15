@@ -1,0 +1,5 @@
+model_name,model_type,weights_file,checkpoint_path,num_parameters_million,device,inference_time_sec_per_image,input_size,notes
+GroundingDINO,open-vocabulary,/models/groundingdino.pth,/models/groundingdino.pth,,,,,
+YOLOv8n,detector,/models/yolov8n.pt,/models/yolov8n.pt,,,,,
+DETR,transformer-detector,/models/detr.pth,/models/detr.pth,,,,,
+FasterRCNN,cnn-detector,/models/fasterrcnn.pth,/models/fasterrcnn.pth,,,,,

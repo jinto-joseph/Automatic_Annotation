@@ -2,6 +2,75 @@
 
 This project automatically generates object-detection labels (YOLO format) for road-scene images using a vision-language model (GroundingDINO) through the Autodistill framework.
 
+## Multi-Model Evaluation Workflow
+
+After generating predictions, compare them against dataset ground truth (`annos`) using the scripts below.
+
+### Expected folder structure
+
+```text
+/workspace/results/
+    predictions/
+        groundingdino/
+            test/*.txt
+        yolov8/
+            test/*.txt
+        detr/
+            test/*.txt
+    visualizations/
+    metrics_summary_test.csv
+    metrics_per_class_test.csv
+```
+
+Ground truth and images are read from:
+
+```text
+/data/IDD_FGVD/test/images
+/data/IDD_FGVD/test/annos
+```
+
+### 1) Evaluate all models (Precision, Recall, F1, mAP@50, mean IoU)
+
+```bash
+python evaluate_models.py \
+    --dataset-root /data/IDD_FGVD \
+    --split test \
+    --predictions-root /workspace/results/predictions \
+    --results-root /workspace/results
+```
+
+Outputs:
+- `/workspace/results/metrics_summary_test.csv`
+- `/workspace/results/metrics_per_class_test.csv`
+
+### 2) Create Pred-vs-GT visualizations
+
+```bash
+python visualize_pred_vs_gt.py \
+    --images-dir /data/IDD_FGVD/test/images \
+    --gt-dir /data/IDD_FGVD/test/annos \
+    --pred-dir /workspace/results/predictions/groundingdino/test \
+    --out-dir /workspace/results/visualizations/groundingdino_test \
+    --sample 50
+```
+
+Legend:
+- Green boxes: Ground truth
+- Red boxes: Predictions
+
+### 3) Track model artifacts and metadata
+
+Use `/workspace/results/model_registry_template.csv` to store:
+- model name/type
+- checkpoint or `.pt/.pth` file path
+- number of parameters
+- inference speed
+- notes
+
+### Note on confidence scores
+
+`auto_annotate.py` now supports writing confidence to prediction labels (6th value) when available. This improves AP/mAP computation quality during comparison.
+
 It is designed for BDD100K-style data and supports both:
 - full dataset annotation (train/val/test splits), and
 - quick testing on a small folder (`test/`).

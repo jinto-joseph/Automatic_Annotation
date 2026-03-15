@@ -1,5 +1,6 @@
 import glob
 import os
+import sys
 import time
 
 import cv2
@@ -19,10 +20,14 @@ OUTPUT_ROOT = "/workspace/labels"
 ONTOLOGY_MAP = {
     "car": "car",
     "bus": "bus",
-    "traffic light": "traffic_light",
+    "truck": "truck",
+    "motorcycle": "motorcycle",
+    "bicycle": "bicycle",
+    "autorickshaw": "autorickshaw",
     "person": "person",
-    "tree": "tree",
-    "building": "building"
+    "traffic light": "traffic_light",
+    "traffic sign": "traffic_sign",
+    "road barrier": "barrier"
 }
 
 SPLITS = ["train", "val", "test"]
@@ -32,20 +37,23 @@ TEXT_THRESHOLD = 0.25
 
 APPLY_NMS = True
 NMS_IOU_THRESH = 0.5
+SAVE_CONFIDENCE = True
 
 
 # --------------------------------------------------------
 # Helper function
 # --------------------------------------------------------
 
-def write_yolo_label(label_path, detections, img_w, img_h):
+def write_yolo_label(label_path, detections, img_w, img_h, save_confidence=False):
 
     os.makedirs(os.path.dirname(label_path), exist_ok=True)
 
     lines = []
 
     if detections is not None and len(detections) > 0:
-        for xyxy, cls_id in zip(detections.xyxy, detections.class_id):
+        has_conf = hasattr(detections, "confidence") and detections.confidence is not None
+
+        for idx, (xyxy, cls_id) in enumerate(zip(detections.xyxy, detections.class_id)):
 
             x1, y1, x2, y2 = xyxy
 
@@ -55,7 +63,13 @@ def write_yolo_label(label_path, detections, img_w, img_h):
             h = (y2 - y1) / img_h
 
             if w > 0 and h > 0:
-                lines.append(f"{int(cls_id)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
+                if save_confidence and has_conf and idx < len(detections.confidence):
+                    conf = float(detections.confidence[idx])
+                    lines.append(
+                        f"{int(cls_id)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f} {conf:.6f}"
+                    )
+                else:
+                    lines.append(f"{int(cls_id)} {cx:.6f} {cy:.6f} {w:.6f} {h:.6f}")
 
     with open(label_path, "w") as f:
         f.write("\n".join(lines))
@@ -115,7 +129,21 @@ def main():
 
             h, w = image.shape[:2]
 
-            detections = model.predict(image)
+            try:
+                detections = model.predict(image)
+            except NameError as exc:
+                # Common GroundingDINO packaging conflict: wrong package provides `groundingdino`
+                # without the required ops expected by autodistill-grounding-dino on GPU.
+                if "_C" in str(exc):
+                    print("\nERROR: GroundingDINO CUDA op `_C` is missing in this environment.")
+                    print("This is usually caused by installing `groundingdino` from GitHub directly")
+                    print("instead of `rf-groundingdino` used by autodistill-grounding-dino.")
+                    print("\nFix inside the container:")
+                    print("  pip uninstall -y groundingdino rf-groundingdino")
+                    print("  pip install rf-groundingdino==0.1.2 --no-build-isolation")
+                    print("  pip install autodistill-grounding-dino==0.1.4")
+                    sys.exit(1)
+                raise
 
             if APPLY_NMS and detections is not None and len(detections) > 0:
                 detections = detections.with_nms(
@@ -123,7 +151,13 @@ def main():
                     class_agnostic=True
                 )
 
-            n = write_yolo_label(label_path, detections, w, h)
+            n = write_yolo_label(
+                label_path,
+                detections,
+                w,
+                h,
+                save_confidence=SAVE_CONFIDENCE,
+            )
 
             total_labels += n
             total_images += 1
