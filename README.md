@@ -6,6 +6,8 @@ This project automatically generates object-detection labels (YOLO format) for r
 
 After generating predictions, compare them against dataset ground truth (`annos`) using the scripts below.
 
+Supported models in this repository: `groundingdino`, `groundedsam`, `yoloworld`, `owlvit`.
+
 ### Expected folder structure
 
 ```text

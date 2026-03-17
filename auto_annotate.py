@@ -1,3 +1,4 @@
+import argparse
 import glob
 import os
 import sys
@@ -14,8 +15,8 @@ from autodistill_grounding_dino import GroundingDINO
 # Configuration
 # --------------------------------------------------------
 
-DATASET_ROOT = "/data/IDD_FGVD"
-OUTPUT_ROOT = "/workspace/labels"
+DEFAULT_DATASET_ROOT = "/data/IDD_FGVD"
+DEFAULT_OUTPUT_ROOT = "/workspace/labels"
 
 ONTOLOGY_MAP = {
     "car": "car",
@@ -30,7 +31,7 @@ ONTOLOGY_MAP = {
     "road barrier": "barrier"
 }
 
-SPLITS = ["train", "val", "test"]
+DEFAULT_SPLITS = ["train", "val", "test"]
 
 BOX_THRESHOLD = 0.35
 TEXT_THRESHOLD = 0.25
@@ -38,6 +39,79 @@ TEXT_THRESHOLD = 0.25
 APPLY_NMS = True
 NMS_IOU_THRESH = 0.5
 SAVE_CONFIDENCE = True
+
+SUPPORTED_MODELS = [
+    "groundingdino",
+    "groundedsam",
+    "yoloworld",
+    "owlvit",
+]
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Auto-annotate dataset using open-vocabulary detection models.")
+    parser.add_argument("--model", default="groundingdino", choices=SUPPORTED_MODELS)
+    parser.add_argument("--dataset-root", default=DEFAULT_DATASET_ROOT)
+    parser.add_argument("--output-root", default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--splits", nargs="+", default=DEFAULT_SPLITS)
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--save-confidence", action="store_true", default=SAVE_CONFIDENCE)
+    parser.add_argument("--box-threshold", type=float, default=BOX_THRESHOLD)
+    parser.add_argument("--text-threshold", type=float, default=TEXT_THRESHOLD)
+    parser.add_argument("--nms-iou", type=float, default=NMS_IOU_THRESH)
+    parser.add_argument("--disable-nms", action="store_true")
+    return parser.parse_args()
+
+
+def build_model(model_name, ontology, box_threshold, text_threshold):
+    def _init_model(model_cls):
+        # Backends expose slightly different constructor signatures.
+        try:
+            return model_cls(
+                ontology=ontology,
+                box_threshold=box_threshold,
+                text_threshold=text_threshold,
+            )
+        except TypeError:
+            try:
+                return model_cls(
+                    ontology=ontology,
+                    box_threshold=box_threshold,
+                )
+            except TypeError:
+                return model_cls(ontology=ontology)
+
+    if model_name == "groundingdino":
+        return _init_model(GroundingDINO)
+
+    if model_name == "groundedsam":
+        try:
+            from autodistill_grounded_sam import GroundedSAM
+        except ImportError as exc:
+            raise ImportError(
+                "Missing backend package for groundedsam. Install with: pip install autodistill-grounded-sam"
+            ) from exc
+        return _init_model(GroundedSAM)
+
+    if model_name == "yoloworld":
+        try:
+            from autodistill_yolo_world import YOLOWorldModel
+        except ImportError as exc:
+            raise ImportError(
+                "Missing backend package for yoloworld. Install with: pip install autodistill-yolo-world"
+            ) from exc
+        return _init_model(YOLOWorldModel)
+
+    if model_name == "owlvit":
+        try:
+            from autodistill_owl_vit import OWLViT
+        except ImportError as exc:
+            raise ImportError(
+                "Missing backend package for owlvit. Install with: pip install autodistill-owl-vit"
+            ) from exc
+        return _init_model(OWLViT)
+
+    raise ValueError(f"Unsupported model: {model_name}")
 
 
 # --------------------------------------------------------
@@ -82,18 +156,32 @@ def write_yolo_label(label_path, detections, img_w, img_h, save_confidence=False
 # --------------------------------------------------------
 
 def main():
+    args = parse_args()
+    apply_nms = not args.disable_nms
 
-    print("\nAutomatic Annotation Pipeline (GroundingDINO)")
-    print("Dataset:", DATASET_ROOT)
-    print("Output :", OUTPUT_ROOT)
+    print("\nAutomatic Annotation Pipeline")
+    print("Model  :", args.model)
+    print("Dataset:", args.dataset_root)
+    print("Output :", args.output_root)
+
+    # ── GPU guard ────────────────────────────────────────────────────────────
+    import torch
+    if not torch.cuda.is_available():
+        print("\nERROR: No GPU detected. Set --device cpu or fix CUDA setup.")
+        sys.exit(1)
+    gpu_name = torch.cuda.get_device_name(0)
+    gpu_mem  = torch.cuda.get_device_properties(0).total_memory // (1024**2)
+    print(f"GPU    : {gpu_name}  ({gpu_mem} MiB)")
+    # ─────────────────────────────────────────────────────────────────────────
 
     ontology = CaptionOntology(ONTOLOGY_MAP)
 
-    print("\nLoading GroundingDINO model...")
-    model = GroundingDINO(
+    print("\nLoading model...")
+    model = build_model(
+        model_name=args.model,
         ontology=ontology,
-        box_threshold=BOX_THRESHOLD,
-        text_threshold=TEXT_THRESHOLD
+        box_threshold=args.box_threshold,
+        text_threshold=args.text_threshold,
     )
 
     total_images = 0
@@ -101,10 +189,10 @@ def main():
 
     start = time.time()
 
-    for split in SPLITS:
+    for split in args.splits:
 
-        img_dir = os.path.join(DATASET_ROOT, split, "images")
-        label_dir = os.path.join(OUTPUT_ROOT, split)
+        img_dir = os.path.join(args.dataset_root, split, "images")
+        label_dir = os.path.join(args.output_root, split)
 
         os.makedirs(label_dir, exist_ok=True)
 
@@ -119,7 +207,7 @@ def main():
             name = os.path.splitext(os.path.basename(img_path))[0]
             label_path = os.path.join(label_dir, name + ".txt")
 
-            if os.path.exists(label_path):
+            if not args.overwrite and os.path.exists(label_path):
                 continue
 
             image = cv2.imread(img_path)
@@ -145,9 +233,9 @@ def main():
                     sys.exit(1)
                 raise
 
-            if APPLY_NMS and detections is not None and len(detections) > 0:
+            if apply_nms and detections is not None and len(detections) > 0:
                 detections = detections.with_nms(
-                    threshold=NMS_IOU_THRESH,
+                    threshold=args.nms_iou,
                     class_agnostic=True
                 )
 
@@ -156,7 +244,7 @@ def main():
                 detections,
                 w,
                 h,
-                save_confidence=SAVE_CONFIDENCE,
+                save_confidence=args.save_confidence,
             )
 
             total_labels += n
