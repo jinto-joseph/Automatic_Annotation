@@ -1,7 +1,3 @@
-# Annotation output files
-labels/
-results/
-
 # Python
 __pycache__/
 *.py[cod]
